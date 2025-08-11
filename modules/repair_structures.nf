@@ -1,6 +1,5 @@
 process REPAIR_STRUCTURES {
-    conda "conda-forge::python=3.9"
-    
+    container "docker://bumproo/foldx5"
     publishDir "${params.outdir}/repaired_structures", mode: 'copy'
     
     input:

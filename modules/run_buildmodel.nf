@@ -1,6 +1,5 @@
 process RUN_BUILDMODEL {
-    conda "conda-forge::python=3.9"
-    
+    container "docker://bumproo/foldx5"
     publishDir "${params.outdir}/foldx_results", mode: 'copy'
     
     input:
