@@ -1,17 +1,15 @@
 process PARSE_FXOUT {
-    conda "conda-forge::pandas=2.0.3"
-    
-    publishDir "${params.outdir}/parsed_outputs", mode: 'copy'
+    container "docker://jupyter/scipy-notebook:latest"
+    publishDir "${params.outdir}/parsed_results", mode: 'copy'
     
     input:
-    path fxout_file
+    path foldx_results
     
     output:
-    path "*.csv", emit: csv
+    path "parsed_results.csv", emit: parsed_results
     
     script:
-    def prefix = fxout_file.baseName
     """
-    parse_fxout.py ${fxout_file} ${prefix}_clean.csv
+    parse_fxout.py ${foldx_results}
     """
 }

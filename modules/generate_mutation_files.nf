@@ -1,7 +1,5 @@
 process GENERATE_MUTATION_FILES {
-    conda "conda-forge::pandas=2.0.3"
-    
-    publishDir "${params.outdir}/mutation_files", mode: 'copy'
+    container "docker://jupyter/scipy-notebook:latest"
     
     input:
     path mutation_csv

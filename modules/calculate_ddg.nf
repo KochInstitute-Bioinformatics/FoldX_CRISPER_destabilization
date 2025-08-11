@@ -1,6 +1,5 @@
 process CALCULATE_DDG {
-    conda "conda-forge::pandas=2.0.3"
-    
+    container "docker://jupyter/scipy-notebook:latest"
     publishDir "${params.outdir}/final_results", mode: 'copy'
     
     input:
@@ -12,6 +11,6 @@ process CALCULATE_DDG {
     
     script:
     """
-    parse_energies.py ${foldx_results} ${original_csv} final_ddG_results.csv
+    parse_energies.py ${foldx_results.join(' ')} ${original_csv} final_ddG_results.csv
     """
 }
