@@ -35,18 +35,21 @@ workflow FOLDX_ANALYSIS {
 
         // Step 3: Run FoldX BuildModel for WT and mutants
         RUN_BUILDMODEL(
-            GENERATE_MUTATION_FILES.out.mutation_files,
-            REPAIR_STRUCTURES.out.repaired_pdbs,
-            foldx_path_ch,
-            structure_dir_ch
+        GENERATE_MUTATION_FILES.out.mutation_files,
+        REPAIR_STRUCTURES.out.repaired_pdbs,
+        foldx_path_ch,
+        structure_dir_ch
         )
 
-        // Step 4: Calculate ΔΔG values
+        // Step 4: Collect all FoldX results into a single directory
+        foldx_results_collected = RUN_BUILDMODEL.out.foldx_results.collect()
+
+        // Step 5: Calculate ΔΔG values
         CALCULATE_DDG(
-            RUN_BUILDMODEL.out.foldx_results,
+            foldx_results_collected,
             mutation_csv_ch
         )
-
+        
     emit:
         results = CALCULATE_DDG.out.final_results
 }
