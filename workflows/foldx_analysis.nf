@@ -18,7 +18,9 @@ workflow FOLDX_ANALYSIS {
         // Create input channels
         mutation_csv_ch = Channel.fromPath(params.mutation_csv, checkIfExists: true)
         foldx_path_ch = Channel.value(params.foldx_path)
-        structure_dir_ch = Channel.value(params.structure_dir)
+        
+        // Create channel for PDB files - stage them for container access
+        pdb_files_ch = Channel.fromPath("${params.structure_dir}/*.pdb", checkIfExists: true)
 
         // Step 1: Generate individual mutation files
         GENERATE_MUTATION_FILES(
@@ -26,19 +28,19 @@ workflow FOLDX_ANALYSIS {
             params.chain
         )
 
-        // Step 2: Repair PDB structures
+        // Step 2: Repair PDB structures - now with staged PDB files
         REPAIR_STRUCTURES(
             GENERATE_MUTATION_FILES.out.genes,
             foldx_path_ch,
-            structure_dir_ch
+            pdb_files_ch.collect()  // Collect all PDB files for staging
         )
 
         // Step 3: Run FoldX BuildModel for WT and mutants
         RUN_BUILDMODEL(
-        GENERATE_MUTATION_FILES.out.mutation_files,
-        REPAIR_STRUCTURES.out.repaired_pdbs,
-        foldx_path_ch,
-        structure_dir_ch
+            GENERATE_MUTATION_FILES.out.mutation_files,
+            REPAIR_STRUCTURES.out.repaired_pdbs,
+            foldx_path_ch,
+            pdb_files_ch.collect()  // Add the 4th input
         )
 
         // Step 4: Collect all FoldX results into a single directory

@@ -6,21 +6,25 @@ process RUN_BUILDMODEL {
     path mutation_files
     path repaired_pdbs
     val foldx_path
-    val structure_dir
+    path pdb_files
     
     output:
-    path "*/Average.fxout", emit: foldx_results
+    path "*/*.fxout", emit: foldx_results  // Changed to capture all .fxout files with directory structure
     
     script:
     """
     echo "=== RUN_BUILDMODEL DEBUG INFO ==="
     echo "FoldX path: ${foldx_path}"
-    echo "Mutation files: ${mutation_files}"
-    echo "Repaired PDBs: ${repaired_pdbs}"
+    echo "Number of mutation files: \$(echo ${mutation_files} | wc -w)"
+    echo "Number of repaired PDBs: \$(echo ${repaired_pdbs} | wc -w)"
     
-    # List all available files
-    echo "All files in working directory:"
-    ls -la
+    # Test FoldX executable
+    if ! command -v ${foldx_path} &> /dev/null; then
+        echo "ERROR: FoldX executable not found at ${foldx_path}"
+        exit 1
+    fi
+    
+    success_count=0
     
     for mut_file in ${mutation_files}; do
         # Extract gene and mutation info from filename
@@ -30,20 +34,14 @@ process RUN_BUILDMODEL {
         
         echo "Processing: \$base_name (Gene: \$gene, Mutation: \$mutation)"
         
-        # Determine if this is WT or mutant
+        # Determine output directory name
         if [[ \$mutation == "WT" ]]; then
-            out_dir="\${gene}_WT"
+            out_dir="\${gene}_WT_BuildModel"
         else
-            out_dir="\${gene}_\${mutation}"
+            out_dir="\${gene}_\${mutation}_BuildModel"
         fi
         
         echo "Output directory: \$out_dir"
-        
-        # Skip if already exists
-        if [ -f "\${out_dir}/Average.fxout" ]; then
-            echo "  ✓ Results already exist, skipping"
-            continue
-        fi
         
         # Create output directory
         mkdir -p \$out_dir
@@ -66,19 +64,35 @@ process RUN_BUILDMODEL {
         # Run FoldX BuildModel
         cd \$out_dir
         echo "  → Running FoldX BuildModel in \$out_dir"
-        echo "  → Command: ${foldx_path} --command=BuildModel --pdb=\${gene}_Repair.pdb --mutant-file=individual_list.txt --numberOfRuns=${params.number_of_runs}"
         
-        ${foldx_path} --command=BuildModel --pdb=\${gene}_Repair.pdb --mutant-file=individual_list.txt --numberOfRuns=${params.number_of_runs}
-        
-        # Check FoldX exit status
-        foldx_exit=\$?
-        echo "  → FoldX exit status: \$foldx_exit"
-        
-        # Check results
-        if [ -f "Average.fxout" ]; then
-            echo "  ✓ BuildModel successful"
+        if ${foldx_path} --command=BuildModel \\
+            --pdb=\${gene}_Repair.pdb \\
+            --mutant-file=individual_list.txt \\
+            --numberOfRuns=${params.number_of_runs}; then
+            
+            # Check for the correct Average file pattern
+            if ls Average_*.fxout 1> /dev/null 2>&1; then
+                echo "  ✓ BuildModel successful"
+                echo "  → Average files found:"
+                ls -la Average_*.fxout
+                
+                # Rename files to include mutation info to avoid collisions
+                for fxout_file in *.fxout; do
+                    if [[ \$fxout_file != *"\${mutation}"* ]]; then
+                        new_name="\${gene}_\${mutation}_\${fxout_file}"
+                        mv "\$fxout_file" "\$new_name"
+                        echo "  → Renamed \$fxout_file to \$new_name"
+                    fi
+                done
+                
+                success_count=\$((success_count + 1))
+            else
+                echo "  ✗ BuildModel completed but no Average_*.fxout produced"
+                echo "  → Files in output directory:"
+                ls -la *.fxout
+            fi
         else
-            echo "  ✗ BuildModel failed - no Average.fxout produced"
+            echo "  ✗ FoldX BuildModel failed with exit code \$?"
             echo "  → Files in output directory:"
             ls -la
         fi
@@ -86,14 +100,14 @@ process RUN_BUILDMODEL {
         cd ..
     done
     
-    echo "=== FINAL RESULTS ==="
-    find . -name "Average.fxout" -exec echo "Found: {}" \\;
+    echo "=== BUILDMODEL SUMMARY ==="
+    echo "Successfully processed \$success_count mutations"
+    find . -name "*.fxout" -exec echo "Found: {}" \\;
     
-    # Ensure at least one output file exists
-    if ! find . -name "Average.fxout" | grep -q .; then
-        echo "No Average.fxout files found, creating dummy"
-        mkdir -p dummy_output
-        touch dummy_output/Average.fxout
+    # Exit with error if no BuildModel runs were successful
+    if [ \$success_count -eq 0 ]; then
+        echo "ERROR: No BuildModel runs were successful"
+        exit 1
     fi
     """
 }
