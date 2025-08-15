@@ -9,7 +9,7 @@ process RUN_BUILDMODEL {
     path pdb_files
     
     output:
-    path "*/*.fxout", emit: foldx_results  // Changed to capture all .fxout files with directory structure
+    path "*/*.fxout", emit: foldx_results
     
     script:
     """
@@ -34,13 +34,14 @@ process RUN_BUILDMODEL {
         
         echo "Processing: \$base_name (Gene: \$gene, Mutation: \$mutation)"
         
-        # Determine output directory name
+        # Skip WT files - we'll handle WT separately
         if [[ \$mutation == "WT" ]]; then
-            out_dir="\${gene}_WT_BuildModel"
-        else
-            out_dir="\${gene}_\${mutation}_BuildModel"
+            echo "  → Skipping WT file (will be processed separately)"
+            continue
         fi
         
+        # Determine output directory name
+        out_dir="\${gene}_\${mutation}_BuildModel"
         echo "Output directory: \$out_dir"
         
         # Create output directory
@@ -61,41 +62,52 @@ process RUN_BUILDMODEL {
         # Copy mutation file
         cp \$mut_file \$out_dir/individual_list.txt
         
-        # Run FoldX BuildModel
         cd \$out_dir
-        echo "  → Running FoldX BuildModel in \$out_dir"
         
+        echo "  → Step 1: Running FoldX Stability on WT structure"
+        # First, run Stability on the WT structure to get baseline energy
+        if ${foldx_path} --command=Stability \\
+            --pdb=\${gene}_Repair.pdb \\
+            --numberOfRuns=${params.number_of_runs}; then
+            echo "  ✓ WT Stability calculation successful"
+            
+            # Rename WT stability files
+            for fxout_file in *.fxout; do
+                if [[ \$fxout_file == *"Stability"* ]]; then
+                    new_name="\${gene}_WT_\${fxout_file}"
+                    mv "\$fxout_file" "\$new_name"
+                    echo "  → Renamed WT file: \$fxout_file to \$new_name"
+                fi
+            done
+        else
+            echo "  ✗ WT Stability calculation failed"
+        fi
+        
+        echo "  → Step 2: Running FoldX BuildModel on mutant"
+        # Then run BuildModel for the mutation
         if ${foldx_path} --command=BuildModel \\
             --pdb=\${gene}_Repair.pdb \\
             --mutant-file=individual_list.txt \\
             --numberOfRuns=${params.number_of_runs}; then
             
-            # Check for the correct Average file pattern
-            if ls Average_*.fxout 1> /dev/null 2>&1; then
-                echo "  ✓ BuildModel successful"
-                echo "  → Average files found:"
-                ls -la Average_*.fxout
-                
-                # Rename files to include mutation info to avoid collisions
-                for fxout_file in *.fxout; do
-                    if [[ \$fxout_file != *"\${mutation}"* ]]; then
-                        new_name="\${gene}_\${mutation}_\${fxout_file}"
-                        mv "\$fxout_file" "\$new_name"
-                        echo "  → Renamed \$fxout_file to \$new_name"
-                    fi
-                done
-                
-                success_count=\$((success_count + 1))
-            else
-                echo "  ✗ BuildModel completed but no Average_*.fxout produced"
-                echo "  → Files in output directory:"
-                ls -la *.fxout
-            fi
+            echo "  ✓ BuildModel successful"
+            
+            # Rename mutant files to include mutation info
+            for fxout_file in *.fxout; do
+                if [[ \$fxout_file != *"\${gene}_WT_"* && \$fxout_file != *"\${mutation}"* ]]; then
+                    new_name="\${gene}_\${mutation}_\${fxout_file}"
+                    mv "\$fxout_file" "\$new_name"
+                    echo "  → Renamed mutant file: \$fxout_file to \$new_name"
+                fi
+            done
+            
+            success_count=\$((success_count + 1))
         else
             echo "  ✗ FoldX BuildModel failed with exit code \$?"
-            echo "  → Files in output directory:"
-            ls -la
         fi
+        
+        echo "  → Files in output directory:"
+        ls -la *.fxout
         
         cd ..
     done
