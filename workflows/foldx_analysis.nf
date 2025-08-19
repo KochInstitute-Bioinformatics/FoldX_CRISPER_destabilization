@@ -1,4 +1,3 @@
-include { PARSE_FXOUT } from '../modules/parse_fxout'
 include { GENERATE_MUTATION_FILES } from '../modules/generate_mutation_files'
 include { REPAIR_STRUCTURES } from '../modules/repair_structures'
 include { RUN_BUILDMODEL } from '../modules/run_buildmodel'
@@ -6,52 +5,79 @@ include { CALCULATE_DDG } from '../modules/calculate_ddg'
 
 workflow FOLDX_ANALYSIS {
     main:
-        // Input validation
-        if (!params.mutation_csv) {
-            error "Please provide a mutation CSV file with --mutation_csv"
+    // Input validation
+    if (!params.mutation_csv) {
+        error "Please provide a mutation CSV file with --mutation_csv"
+    }
+    if (!params.foldx_path) {
+        error "Please provide the FoldX executable path with --foldx_path"
+    }
+
+    // Create input channels
+    mutation_csv_ch = Channel.fromPath(params.mutation_csv, checkIfExists: true)
+    foldx_path_ch = Channel.value(params.foldx_path)
+    pdb_files_ch = Channel.fromPath("${params.structure_dir}/*.pdb", checkIfExists: true)
+
+    // Step 1: Generate individual mutation files
+    GENERATE_MUTATION_FILES(
+        mutation_csv_ch,
+        params.chain
+    )
+
+    // Step 2: Repair PDB structures
+    REPAIR_STRUCTURES(
+        GENERATE_MUTATION_FILES.out.genes,
+        foldx_path_ch,
+        pdb_files_ch.collect()
+    )
+
+    // Step 3: Prepare mutation-repair file pairs
+    // Create a channel that pairs each mutation file with its corresponding repaired PDB
+    mutation_files_with_info = GENERATE_MUTATION_FILES.out.mutation_files
+        .flatten()
+        .map { file ->
+            // Extract gene and mutation from filename
+            def filename = file.name
+            def basename = filename.replaceAll('\\.individual_list\\.txt$', '')
+            def parts = basename.split('_')
+            def gene = parts[0]
+            def mutation = parts.size() > 1 ? parts[1..-1].join('_') : 'WT'
+            [gene, mutation, file]
         }
-        if (!params.foldx_path) {
-            error "Please provide the FoldX executable path with --foldx_path"
+
+    // Create repair files channel with gene info
+    repair_files_with_gene = REPAIR_STRUCTURES.out.repaired_pdbs
+        .flatten()
+        .map { file ->
+            def gene = file.name.replaceAll('_Repair\\.pdb$', '')
+            [gene, file]
         }
 
-        // Create input channels
-        mutation_csv_ch = Channel.fromPath(params.mutation_csv, checkIfExists: true)
-        foldx_path_ch = Channel.value(params.foldx_path)
+    // Combine mutation files with their corresponding repair files
+    mutation_repair_pairs = mutation_files_with_info
+        .combine(repair_files_with_gene, by: 0)
+        .map { _gene, mutation, mut_file, repair_file ->
+            [_gene, mutation, mut_file, repair_file]
+        }
 
-        // Create channel for PDB files - stage them for container access
-        pdb_files_ch = Channel.fromPath("${params.structure_dir}/*.pdb", checkIfExists: true)
+    // Step 4: Run FoldX BuildModel
+    RUN_BUILDMODEL(
+        mutation_repair_pairs,
+        foldx_path_ch
+    )
 
-        // Step 1: Generate individual mutation files
-        GENERATE_MUTATION_FILES(
-            mutation_csv_ch,
-            params.chain
-        )
+    // Step 5: Calculate ΔΔG values
+    // Collect only the .fxout files from RUN_BUILDMODEL output
+    foldx_results_files = RUN_BUILDMODEL.out.foldx_results
+        .map { _gene, _mutation, fxout_files -> fxout_files }
+        .flatten()
+        .collect()
 
-        // Step 2: Repair PDB structures - now with staged PDB files
-        REPAIR_STRUCTURES(
-            GENERATE_MUTATION_FILES.out.genes,
-            foldx_path_ch,
-            pdb_files_ch.collect()  // Collect all PDB files for staging
-        )
-
-        // Step 3: Run FoldX BuildModel for WT and mutants (now runs 5 times by default)
-        RUN_BUILDMODEL(
-            GENERATE_MUTATION_FILES.out.mutation_files,
-            REPAIR_STRUCTURES.out.repaired_pdbs,
-            foldx_path_ch,
-            pdb_files_ch.collect()  // Add the 4th input
-        )
-
-        // Step 4: Collect all FoldX results into a single directory
-        foldx_results_collected = RUN_BUILDMODEL.out.foldx_results.collect()
-
-        // Step 5: Calculate averaged ΔΔG values from multiple runs
-        CALCULATE_DDG(
-            foldx_results_collected,
-            mutation_csv_ch
-        )
+    CALCULATE_DDG(
+        foldx_results_files,
+        mutation_csv_ch
+    )
 
     emit:
-        results = CALCULATE_DDG.out.final_results
-        detailed_results = CALCULATE_DDG.out.detailed_results
+    results = CALCULATE_DDG.out.final_results
 }
