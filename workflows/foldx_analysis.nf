@@ -1,6 +1,5 @@
 include { GENERATE_MUTATION_FILES } from '../modules/generate_mutation_files'
-include { CHECK_REPAIRED_FILES } from '../modules/check_repaired_files'
-include { REPAIR_STRUCTURES } from '../modules/repair_structures'
+include { REPAIR_STRUCTURES_CONDITIONAL } from '../modules/repair_structures_conditional'
 include { RUN_BUILDMODEL } from '../modules/run_buildmodel'
 include { CALCULATE_DDG } from '../modules/calculate_ddg'
 
@@ -22,36 +21,22 @@ workflow FOLDX_ANALYSIS {
     // Create channel for the parse script
     parse_mutations_script = Channel.fromPath("${projectDir}/bin/parse_mutations.py", checkIfExists: true)
     
-    // Step 1: Generate individual mutation files (only for actual mutations, not WT)
+    // Step 1: Generate individual mutation files
     GENERATE_MUTATION_FILES(
         mutation_csv_ch,
         params.chain,
         parse_mutations_script
     )
     
-    // Step 2: Check for existing repaired files
-    CHECK_REPAIRED_FILES(
+    // Step 2: Repair structures (with built-in checking for existing files)
+    REPAIR_STRUCTURES_CONDITIONAL(
         GENERATE_MUTATION_FILES.out.genes,
+        foldx_path_ch,
+        pdb_files_ch.collect(),
         params.repaired_structures_dir ?: ""
     )
     
-    // Step 3: Repair only structures that need it
-    REPAIR_STRUCTURES(
-        CHECK_REPAIRED_FILES.out.genes_to_repair,
-        foldx_path_ch,
-        pdb_files_ch.collect()
-    )
-    
-    // Step 4: Combine existing and newly repaired structures
-    existing_repaired_ch = CHECK_REPAIRED_FILES.out.existing_files
-        .splitText() { it.trim() }
-        .filter { it != "" }
-        .map { file_path -> file(file_path) }
-    
-    all_repaired_pdbs = existing_repaired_ch
-        .mix(REPAIR_STRUCTURES.out.repaired_pdbs.flatten())
-    
-    // Step 5: Prepare mutation files with their corresponding repaired structures
+    // Step 3: Prepare mutation files with their corresponding repaired structures
     mutation_files_with_info = GENERATE_MUTATION_FILES.out.mutation_files
         .flatten()
         .map { file ->
@@ -59,11 +44,12 @@ workflow FOLDX_ANALYSIS {
             def basename = filename.replaceAll('\\.individual_list\\.txt$', '')
             def parts = basename.split('_')
             def gene = parts[0]
-            def mutation = parts[1..-1].join('_') // Only actual mutations, no WT
+            def mutation = parts[1..-1].join('_')
             [gene, mutation, file]
         }
     
-    repair_files_with_gene = all_repaired_pdbs
+    repair_files_with_gene = REPAIR_STRUCTURES_CONDITIONAL.out.repaired_pdbs
+        .flatten()
         .map { file ->
             def gene = file.name.replaceAll('_Repair\\.pdb$', '')
             [gene, file]
@@ -76,7 +62,7 @@ workflow FOLDX_ANALYSIS {
             [gene, mutation, mut_file, repair_file]
         }
     
-    // Step 6: Create replicates for each mutation
+    // Step 4: Create replicates for each mutation
     mutation_repair_replicates = mutation_repair_pairs
         .flatMap { gene, mutation, mut_file, repair_file ->
             (1..params.number_of_runs).collect { replicate ->
@@ -84,23 +70,23 @@ workflow FOLDX_ANALYSIS {
             }
         }
     
-    // Step 7: Run FoldX BuildModel for each mutation replicate
+    // Step 5: Run FoldX BuildModel for each mutation replicate
     RUN_BUILDMODEL(
         mutation_repair_replicates,
         foldx_path_ch
     )
     
-    // Step 8: Collect all FoldX results for ΔΔG calculation
+    // Step 6: Collect all FoldX results for ΔΔG calculation
     foldx_results_files = RUN_BUILDMODEL.out.foldx_results
         .map { _gene, _mutation, _replicate, fxout_files -> fxout_files }
         .flatten()
         .collect()
     
-    // Step 9: Create channels for analysis scripts
+    // Step 7: Create channels for analysis scripts
     parse_energies_script = Channel.fromPath("${projectDir}/bin/parse_energies.py", checkIfExists: true)
     parse_fxout_script = Channel.fromPath("${projectDir}/bin/parse_fxout.py", checkIfExists: true)
     
-    // Step 10: Calculate ΔΔG values
+    // Step 8: Calculate ΔΔG values
     CALCULATE_DDG(
         foldx_results_files,
         mutation_csv_ch,
