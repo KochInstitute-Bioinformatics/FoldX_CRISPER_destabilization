@@ -19,10 +19,14 @@ workflow FOLDX_ANALYSIS {
     foldx_path_ch = Channel.value(params.foldx_path)
     pdb_files_ch = Channel.fromPath("${params.structure_dir}/*.pdb", checkIfExists: true)
     
+    // Create channel for the parse script
+    parse_mutations_script = Channel.fromPath("${projectDir}/bin/parse_mutations.py", checkIfExists: true)
+    
     // Step 1: Generate individual mutation files (only for actual mutations, not WT)
     GENERATE_MUTATION_FILES(
         mutation_csv_ch,
-        params.chain
+        params.chain,
+        parse_mutations_script
     )
     
     // Step 2: Check for existing repaired files
@@ -48,7 +52,6 @@ workflow FOLDX_ANALYSIS {
         .mix(REPAIR_STRUCTURES.out.repaired_pdbs.flatten())
     
     // Step 5: Prepare mutation files with their corresponding repaired structures
-    // No need for WT pairing since FoldX calculates WT automatically
     mutation_files_with_info = GENERATE_MUTATION_FILES.out.mutation_files
         .flatten()
         .map { file ->
@@ -82,7 +85,6 @@ workflow FOLDX_ANALYSIS {
         }
     
     // Step 7: Run FoldX BuildModel for each mutation replicate
-    // FoldX will automatically calculate both WT and mutant energies
     RUN_BUILDMODEL(
         mutation_repair_replicates,
         foldx_path_ch
@@ -99,7 +101,6 @@ workflow FOLDX_ANALYSIS {
     parse_fxout_script = Channel.fromPath("${projectDir}/bin/parse_fxout.py", checkIfExists: true)
     
     // Step 10: Calculate ΔΔG values
-    // The scripts should handle WT vs mutant comparison automatically
     CALCULATE_DDG(
         foldx_results_files,
         mutation_csv_ch,
