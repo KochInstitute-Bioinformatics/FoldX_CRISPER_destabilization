@@ -16,36 +16,51 @@ process REPAIR_STRUCTURES {
     echo "Available PDB files:"
     ls -la *.pdb
     
+    # Check if repaired_structures_dir is provided
+    REPAIRED_DIR="${params.repaired_structures_dir ?: ''}"
+    echo "Repaired structures directory: \$REPAIRED_DIR"
+    
     # Use the correct FoldX executable name
     FOLDX_CMD="foldx_20251231"
-    
     echo "Using FoldX command: \$FOLDX_CMD"
     
-    # Test FoldX
-    \$FOLDX_CMD --help || echo "FoldX help failed, but continuing..."
+    # Test FoldX (only if we need to use it)
+    if [[ -z "\$REPAIRED_DIR" ]]; then
+        \$FOLDX_CMD --help || echo "FoldX help failed, but continuing..."
+    fi
     
     # Read genes from file
     while IFS= read -r gene; do
         echo "Processing gene: \$gene"
         
-        # Find corresponding PDB file
+        repaired_file="\${gene}_Repair.pdb"
+        
+        # First, check if we have a pre-repaired structure in the specified directory
+        if [[ -n "\$REPAIRED_DIR" && -f "\$REPAIRED_DIR/\$repaired_file" ]]; then
+            echo "Found pre-repaired structure: \$REPAIRED_DIR/\$repaired_file"
+            cp "\$REPAIRED_DIR/\$repaired_file" ./
+            echo "Copied pre-repaired structure: \$repaired_file"
+            continue
+        fi
+        
+        # If not found in cache, check if already exists in current directory
+        if [[ -f "\$repaired_file" ]]; then
+            echo "Already repaired in current directory: \$repaired_file"
+            continue
+        fi
+        
+        # Find corresponding PDB file for repair
         pdb_file="\${gene}.pdb"
         if [[ -f "\$pdb_file" ]]; then
             echo "Found PDB file: \$pdb_file"
-            
-            # Check if already repaired
-            if [[ -f "\${gene}_Repair.pdb" ]]; then
-                echo "Already repaired: \${gene}_Repair.pdb"
-                continue
-            fi
+            echo "Running FoldX RepairPDB for \$gene (no cached version found)"
             
             # Run FoldX RepairPDB
-            echo "Running FoldX RepairPDB for \$gene"
             \$FOLDX_CMD --command=RepairPDB --pdb=\$pdb_file
             
             # Check if repair was successful
-            if [[ -f "\${gene}_Repair.pdb" ]]; then
-                echo "Successfully repaired: \${gene}_Repair.pdb"
+            if [[ -f "\$repaired_file" ]]; then
+                echo "Successfully repaired: \$repaired_file"
             else
                 echo "ERROR: Failed to repair \$pdb_file"
                 echo "Checking for any output files:"

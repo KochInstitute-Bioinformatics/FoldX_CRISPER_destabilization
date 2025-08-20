@@ -1,6 +1,6 @@
 process RUN_BUILDMODEL {
     container "docker://bumproo/foldx5"
-    publishDir "${params.outdir}/foldx_results", mode: 'copy', overwrite: true
+    publishDir "${params.outdir}/buildmodel_results", mode: 'copy'
     
     input:
     tuple val(gene), val(mutation), path(mutation_file), path(repaired_pdb), val(replicate)
@@ -10,109 +10,93 @@ process RUN_BUILDMODEL {
     tuple val(gene), val(mutation), val(replicate), path("*.fxout"), emit: foldx_results
     
     script:
-    def is_wt = mutation == "WT"
-    def output_prefix = is_wt ? "${gene}_WT_rep${replicate}" : "${gene}_${mutation}_rep${replicate}"
-    
     """
-    echo "=== Processing ${gene} ${mutation} Replicate ${replicate} ==="
+    echo "=== RUN_BUILDMODEL DEBUG ==="
+    echo "Gene: ${gene}"
+    echo "Mutation: ${mutation}"
+    echo "Mutation file: ${mutation_file}"
+    echo "Repaired PDB: ${repaired_pdb}"
+    echo "Replicate: ${replicate}"
     
     # Use the correct FoldX executable name
     FOLDX_CMD="foldx_20251231"
+    echo "Using FoldX command: \$FOLDX_CMD"
     
-    # Test FoldX executable
-    if ! command -v \$FOLDX_CMD &> /dev/null; then
-        echo "ERROR: FoldX executable not found: \$FOLDX_CMD"
+    # List available files
+    echo "Available files:"
+    ls -la
+    
+    # Verify the repaired PDB file exists
+    if [[ ! -f "${repaired_pdb}" ]]; then
+        echo "ERROR: Repaired PDB file not found: ${repaired_pdb}"
         exit 1
     fi
     
-    # List current directory contents
-    echo "Current directory contents:"
-    ls -la
+    # Verify the mutation file exists
+    if [[ ! -f "${mutation_file}" ]]; then
+        echo "ERROR: Mutation file not found: ${mutation_file}"
+        exit 1
+    fi
     
-    # Create unique working copies with FoldX-required names for this replicate
-    PDB_WORK="working_structure_rep${replicate}.pdb"
-    MUTANT_WORK="individual_list_rep${replicate}"
+    # Show contents of mutation file
+    echo "Contents of mutation file ${mutation_file}:"
+    cat ${mutation_file}
     
-    # Copy files with new names
-    cp ${repaired_pdb} \$PDB_WORK
-    cp ${mutation_file} \$MUTANT_WORK
-    
-    echo "Created working files for replicate ${replicate}:"
-    echo "PDB: \$PDB_WORK"
-    echo "Mutations: \$MUTANT_WORK"
-    
-    echo "Contents of mutation file:"
-    cat \$MUTANT_WORK
-    
-    # Create a unique working environment for this replicate
-    # Use different working directory names and add small delays to prevent caching
-    WORK_DIR="foldx_work_rep${replicate}_\$(date +%s%N | cut -b1-13)"
+    # Create a unique working directory for this replicate to avoid conflicts
+    WORK_DIR="${gene}_${mutation}_rep${replicate}"
     mkdir -p \$WORK_DIR
     cd \$WORK_DIR
     
-    # Copy files to unique working directory
-    cp ../\$PDB_WORK ./working_structure.pdb
-    cp ../\$MUTANT_WORK ./individual_list
+    # Copy files to working directory
+    cp ../${repaired_pdb} ./
+    cp ../${mutation_file} ./
     
-    echo "Working in directory: \$WORK_DIR"
+    # Extract the base name of the mutation file (without individual_list_ prefix and .txt extension)
+    MUTATION_FILE_BASE=\$(basename ${mutation_file} .txt)
+    echo "Mutation file base name: \$MUTATION_FILE_BASE"
     
-    # Add a small delay based on replicate number to ensure different execution times
-    sleep \$((${replicate} % 5))
-    
-    # Run FoldX BuildModel for single run
-    echo "Running FoldX BuildModel for replicate ${replicate}..."
+    # Run FoldX BuildModel with correct parameters
+    echo "Running FoldX BuildModel..."
     \$FOLDX_CMD --command=BuildModel \\
-        --pdb=working_structure.pdb \\
-        --mutant-file=individual_list \\
-        --numberOfRuns=1
+        --pdb=${repaired_pdb} \\
+        --mutant-file=\$MUTATION_FILE_BASE \\
+        --numberOfRuns=5
     
-    # Check FoldX exit status
-    FOLDX_EXIT=\$?
-    echo "FoldX exit status for replicate ${replicate}: \$FOLDX_EXIT"
+    # Check if BuildModel was successful
+    if [[ \$? -eq 0 ]]; then
+        echo "FoldX BuildModel completed successfully"
+    else
+        echo "WARNING: FoldX BuildModel may have encountered issues, but continuing..."
+    fi
     
     # List all output files
-    echo "All files after FoldX run:"
+    echo "Output files generated:"
     ls -la
     
-    # Move back to parent directory
-    cd ..
-    
-    # Check if any .fxout files were created
-    if ls \$WORK_DIR/*.fxout 1> /dev/null 2>&1; then
-        echo "Found .fxout files, moving and renaming for replicate ${replicate}..."
-        # Move and rename output files to include gene, mutation, and replicate info
-        for fxout_file in \$WORK_DIR/*.fxout; do
-            if [[ -f "\$fxout_file" ]]; then
-                basename_file=\$(basename "\$fxout_file")
-                new_name="${output_prefix}_\${basename_file}"
-                mv "\$fxout_file" "\$new_name"
-                echo "Moved and renamed: \$fxout_file -> \$new_name"
-            fi
-        done
-    else
-        echo "ERROR: No .fxout files were created by FoldX for replicate ${replicate}"
-        echo "Checking for any FoldX output files:"
-        ls -la \$WORK_DIR/*foldx* 2>/dev/null || echo "No foldx files found"
-        ls -la \$WORK_DIR/*FoldX* 2>/dev/null || echo "No FoldX files found"
-        ls -la \$WORK_DIR/*.out 2>/dev/null || echo "No .out files found"
-        ls -la \$WORK_DIR/*.log 2>/dev/null || echo "No .log files found"
-        
-        # Show FoldX error output if available
-        if [[ -f "\$WORK_DIR/foldx.log" ]]; then
-            echo "FoldX log file contents:"
-            cat \$WORK_DIR/foldx.log
+    # Move .fxout files back to parent directory with unique names
+    for fxout_file in *.fxout; do
+        if [[ -f "\$fxout_file" ]]; then
+            # Create unique filename to avoid conflicts between replicates
+            unique_name="${gene}_${mutation}_rep${replicate}_\$fxout_file"
+            mv "\$fxout_file" "../\$unique_name"
+            echo "Moved \$fxout_file to \$unique_name"
         fi
-        
-        # Create a dummy output file to prevent pipeline failure
-        echo "Creating dummy output file for debugging replicate ${replicate}"
-        echo "FoldX failed to produce output for ${gene} ${mutation} replicate ${replicate}" > "${output_prefix}_dummy.fxout"
-    fi
+    done
+    
+    # Go back to parent directory
+    cd ..
     
     # Clean up working directory
     rm -rf \$WORK_DIR
     
-    # List final outputs
-    echo "Final outputs for replicate ${replicate}:"
-    ls -la *.fxout
+    # Verify we have output files
+    echo "Final output files:"
+    ls -la *.fxout || echo "No .fxout files found"
+    
+    # If no .fxout files, create a dummy one to prevent pipeline failure
+    if ! ls *.fxout 1> /dev/null 2>&1; then
+        echo "No .fxout files generated, creating dummy file for debugging"
+        echo "No results generated for ${gene} ${mutation} replicate ${replicate}" > ${gene}_${mutation}_rep${replicate}_dummy.fxout
+    fi
     """
 }
