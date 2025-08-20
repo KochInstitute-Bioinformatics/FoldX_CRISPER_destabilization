@@ -2,16 +2,13 @@
 """
 Parse mutation CSV file and generate individual FoldX mutation files.
 """
-
 import csv
 import re
 import sys
 import os
-from pathlib import Path
 
 def parse_mutation(mutation_str):
     """Parse mutation string like 'E1932K' into components"""
-    # Match pattern: single letter + numbers + single letter
     match = re.match(r'^([A-Z])(\d+)([A-Z])$', mutation_str.strip())
     if match:
         return match.group(1), match.group(2), match.group(3)
@@ -34,37 +31,24 @@ def main():
     
     try:
         with open(csv_file, 'r') as csvfile:
-            # Peek at the header to determine format
             first_line = csvfile.readline().strip()
-            csvfile.seek(0)  # Reset to beginning
-            
+            csvfile.seek(0)
             print(f"CSV header: {first_line}")
             
             reader = csv.DictReader(csvfile)
-            
             for row_num, row in enumerate(reader, 1):
                 try:
-                    # Handle different CSV formats
-                    if 'gene' in row and 'position' in row and 'wt_aa' in row and 'mut_aa' in row:
-                        # Detailed format: gene, position, wt_aa, mut_aa
-                        gene = row['gene'].strip()
-                        position = row['position'].strip()
-                        wt_aa = row['wt_aa'].strip()
-                        mut_aa = row['mut_aa'].strip()
-                        
-                    elif 'Gene' in row and 'Mutation' in row:
-                        # Simple format: Gene, Mutation (like E1932K)
+                    if 'Gene' in row and 'Mutation' in row:
                         gene = row['Gene'].strip()
                         mutation = row['Mutation'].strip()
+                        
                         try:
                             wt_aa, position, mut_aa = parse_mutation(mutation)
                         except ValueError as e:
-                            print(f"Row {row_num}: Error parsing mutation {mutation} for gene {gene}: {e}")
+                            print(f"Row {row_num}: Error parsing mutation {mutation}: {e}")
                             continue
-                            
                     else:
-                        print("Error: Unrecognized CSV format")
-                        print("Expected columns: 'Gene,Mutation' or 'gene,position,wt_aa,mut_aa'")
+                        print("Error: Expected columns 'Gene' and 'Mutation'")
                         print(f"Found columns: {list(row.keys())}")
                         sys.exit(1)
                     
@@ -72,19 +56,22 @@ def main():
                     
                     # Only generate files for actual mutations (not WT)
                     if wt_aa != mut_aa:
-                        mutation_name = f"{wt_aa}{position}{mut_aa}"
-                        filename = f"{gene}_{mutation_name}.individual_list.txt"
+                        # Correct filename format: individual_list_GENE_MUTATION.txt
+                        filename = f"individual_list_{gene}_{mutation}.txt"
                         
+                        # Create FoldX mutation format: WT_AA,CHAIN,POSITION,MUT_AA;
+                        with open(filename, 'w') as f:
+                            f.write(f"{wt_aa}{chain}{position}{mut_aa};\n")
                         
                         print(f"Generated mutation file: {filename}")
                         mutation_count += 1
                     else:
-                        print(f"Row {row_num}: Skipping WT entry: {gene}{wt_aa}{position}{mut_aa}")
+                        print(f"Row {row_num}: Skipping WT entry: {gene} {wt_aa},{position},{mut_aa}")
                         
                 except Exception as e:
                     print(f"Row {row_num}: Error processing row {row}: {e}")
                     continue
-    
+                    
     except FileNotFoundError:
         print(f"Error: CSV file '{csv_file}' not found")
         sys.exit(1)
@@ -102,6 +89,12 @@ def main():
         print(f"- Generated {mutation_count} mutation files")
         print(f"- Found {len(genes)} unique genes: {', '.join(sorted(genes))}")
         print(f"- Created genes.txt file")
+        
+        # Verify files were created
+        print(f"\nVerifying created files:")
+        for filename in os.listdir('.'):
+            if filename.startswith('individual_list_') and filename.endswith('.txt'):
+                print(f"  - {filename}")
         
     except Exception as e:
         print(f"Error writing genes file: {e}")
