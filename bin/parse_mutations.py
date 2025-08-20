@@ -72,12 +72,9 @@ def main():
                     
                     # Only generate files for actual mutations (not WT)
                     if wt_aa != mut_aa:
-                        mutation_name = f"{wt_aa},{position},{mut_aa}"
+                        mutation_name = f"{wt_aa}{position}{mut_aa}"
                         filename = f"{gene}_{mutation_name}.individual_list.txt"
                         
-                        # Create FoldX mutation format: WT_AA,CHAIN,POSITION,MUT_AA;
-                        with open(filename, 'w') as f:
-                            f.write(f"{wt_aa}{chain}{position}{mut_aa};\n")
                         
                         print(f"Generated mutation file: {filename}")
                         mutation_count += 1
