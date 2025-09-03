@@ -22,15 +22,14 @@ workflow FOLDX_ANALYSIS {
             parse_script_ch
         )
 
-        // Step 2: Get unique genes for repair (OPTIMIZATION: only repair each gene once)
+        // Step 2: Get unique genes for repair - MODIFIED to process individually
         unique_genes_ch = GENERATE_MUTATION_FILES.out.genes
             .splitText()
             .map { it.trim() }
             .filter { it }
             .unique()
-            .collectFile(name: 'unique_genes.txt', newLine: true)
 
-        // Step 3: Repair structures (only once per unique gene)
+        // Step 3: Repair structures - NOW RUNS ONE JOB PER GENE
         REPAIR_STRUCTURES_CONDITIONAL(
             unique_genes_ch,
             params.foldx_path,
@@ -66,12 +65,12 @@ workflow FOLDX_ANALYSIS {
 
         // Get unique genes from mutations and repaired structures
         mutation_genes_list = mutation_files
-            .map { gene, mutation, file -> gene }
+            .map { gene, _mutation, _file -> gene }
             .unique()
             .toList()
 
         repaired_genes_list = repaired_files
-            .map { gene, file -> gene }
+            .map { gene, _file -> gene }
             .toList()
 
         // Step 5: Run BuildModel (only on valid pairs)
@@ -94,7 +93,7 @@ workflow FOLDX_ANALYSIS {
             parse_fxout_script
         )
 
-        // Step 7: Write missing genes to file - pass the gene lists directly
+        // Step 7: Write missing genes to file
         WRITE_MISSING_GENES(
             mutation_genes_list,
             repaired_genes_list
