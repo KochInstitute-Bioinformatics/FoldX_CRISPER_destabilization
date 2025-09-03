@@ -7,7 +7,7 @@ process RUN_BUILDMODEL {
     val number_of_runs
     
     output:
-    tuple val(gene), val(mutation), path("*${gene}_${mutation}*.fxout"), emit: foldx_results
+    tuple val(gene), val(mutation), path("*${gene}_${mutation}*"), emit: foldx_results
     
     script:
     def mutation_filename = mutation_file.name
@@ -36,6 +36,8 @@ process RUN_BUILDMODEL {
     
     # Rename output files to include mutation information to avoid collisions
     echo "Renaming output files to include mutation info..."
+    
+    # Rename .fxout files
     for file in *.fxout; do
         if [[ -f "\$file" ]]; then
             # Extract the base name and add mutation info
@@ -46,7 +48,18 @@ process RUN_BUILDMODEL {
         fi
     done
     
+    # Rename Dif files (these contain the total energy values we want)
+    for file in Dif*.fxout; do
+        if [[ -f "\$file" ]]; then
+            # Add gene and mutation info to Dif files
+            base_name=\$(echo "\$file" | sed 's/\\.fxout//')
+            new_name="\${base_name}_${gene}_${mutation}.fxout"
+            mv "\$file" "\$new_name"
+            echo "Renamed \$file to \$new_name"
+        fi
+    done
+    
     echo "Final output files:"
-    ls -la *${gene}_${mutation}*.fxout
+    ls -la *${gene}_${mutation}*
     """
 }
