@@ -8,7 +8,7 @@ process REPAIR_STRUCTURES_CONDITIONAL {
     val repaired_dir
 
     output:
-    path "*_Repair.pdb", emit: repaired_pdbs, optional: true
+    path "*_Repair.pdb", emit: repaired_pdbs
 
     script:
     """
@@ -55,13 +55,13 @@ process REPAIR_STRUCTURES_CONDITIONAL {
             fi
         else
             echo "ERROR: Repair failed for ${gene}"
-            # Don't create empty file - let it fail and use optional: true
-            exit 1
+            # Create empty file that will be filtered out later
+            touch "\$repaired_file"
         fi
     else
         echo "WARNING: PDB file not found or empty: \$pdb_file - skipping gene ${gene}"
-        # Don't create empty file - let it fail and use optional: true
-        exit 1
+        # Create empty file that will be filtered out later
+        touch "\$repaired_file"
     fi
 
     echo "Final repaired structure for ${gene}:"
