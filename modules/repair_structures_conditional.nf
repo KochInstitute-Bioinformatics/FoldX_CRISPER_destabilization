@@ -19,6 +19,12 @@ process REPAIR_STRUCTURES_CONDITIONAL {
     echo "Available PDB files:"
     ls -la *.pdb
     
+    # Create repaired_structures_dir if it doesn't exist and is specified
+    if [[ -n "${repaired_dir}" ]]; then
+        mkdir -p "${repaired_dir}"
+        echo "Ensured repaired structures directory exists: ${repaired_dir}"
+    fi
+    
     # Process each gene
     while IFS= read -r gene; do
         [[ -z "\$gene" ]] && continue
@@ -30,7 +36,6 @@ process REPAIR_STRUCTURES_CONDITIONAL {
         if [[ -n "${repaired_dir}" ]]; then
             # Try different possible paths for the existing repaired file
             existing_file="${repaired_dir}/\${repaired_file}"
-            
             echo "Looking for existing repaired file at: \$existing_file"
             
             if [[ -f "\$existing_file" ]]; then
@@ -62,6 +67,18 @@ process REPAIR_STRUCTURES_CONDITIONAL {
             
             if [[ -f "\$repaired_file" && -s "\$repaired_file" ]]; then
                 echo "Successfully repaired: \$repaired_file"
+                
+                # NEW: Store the newly repaired structure in repaired_structures_dir
+                if [[ -n "${repaired_dir}" ]]; then
+                    echo "Storing newly repaired structure in: ${repaired_dir}/\${repaired_file}"
+                    cp "\$repaired_file" "${repaired_dir}/\${repaired_file}"
+                    
+                    if [[ -f "${repaired_dir}/\${repaired_file}" ]]; then
+                        echo "Successfully stored repaired structure: ${repaired_dir}/\${repaired_file}"
+                    else
+                        echo "WARNING: Failed to store repaired structure in ${repaired_dir}"
+                    fi
+                fi
             else
                 echo "ERROR: Repair failed for \$gene"
                 echo "Checking for any repair output files:"
@@ -77,5 +94,11 @@ process REPAIR_STRUCTURES_CONDITIONAL {
     
     echo "Final repaired structures:"
     ls -la *_Repair.pdb
+    
+    # Summary of what was stored in repaired_structures_dir
+    if [[ -n "${repaired_dir}" ]]; then
+        echo "Contents of repaired structures directory after processing:"
+        ls -la "${repaired_dir}/" || echo "Cannot list repaired directory"
+    fi
     """
 }
