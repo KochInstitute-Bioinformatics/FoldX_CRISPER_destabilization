@@ -64,7 +64,7 @@ workflow FOLDX_ANALYSIS {
                 [gene, mutation, mut_file, repair_file]
             }
 
-        // Log missing structures and collect them
+        // Log missing structures and collect them - FIXED VERSION
         missing_structures = mutation_files
             .map { gene, _mutation, _file -> gene }
             .unique()
