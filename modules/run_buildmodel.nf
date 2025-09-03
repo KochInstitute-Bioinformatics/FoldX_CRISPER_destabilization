@@ -5,9 +5,12 @@ process RUN_BUILDMODEL {
     tuple val(gene), val(mutation), path(mutation_file), path(repaired_pdb)
     val foldx_path
     val number_of_runs
-    
+
     output:
-    tuple val(gene), val(mutation), path("*${gene}_${mutation}*"), emit: foldx_results
+    tuple val(gene), val(mutation), path("*${gene}_${mutation}*"), emit: foldx_results, optional: true
+
+    when:
+    repaired_pdb.size() > 0  // Only run if repair file is not empty
     
     script:
     def mutation_filename = mutation_file.name
