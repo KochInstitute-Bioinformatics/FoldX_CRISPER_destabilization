@@ -64,29 +64,15 @@ workflow FOLDX_ANALYSIS {
                 [gene, mutation, mut_file, repair_file]
             }
 
-        // CORRECTED APPROACH: Find missing genes
-        // Get all genes that have mutations
-        all_mutation_genes = mutation_files
+        // Get unique genes from mutations and repaired structures
+        mutation_genes_list = mutation_files
             .map { gene, mutation, file -> gene }
             .unique()
-            .collect()
+            .toList()
 
-        // Get all genes that have repaired structures  
-        all_repaired_genes = repaired_files
+        repaired_genes_list = repaired_files
             .map { gene, file -> gene }
-            .collect()
-
-        // Find missing genes and convert to individual channel items
-        missing_structures = all_mutation_genes
-            .combine(all_repaired_genes)
-            .map { mutation_genes, repaired_genes ->
-                def missing = mutation_genes.findAll { gene -> 
-                    !repaired_genes.contains(gene) 
-                }
-                return missing
-            }
-            .flatMap { missing_list -> missing_list }  // FIXED: Convert list to individual items
-            .view { gene -> "WARNING: No structure file found for gene: ${gene} - skipping all mutations for this gene" }
+            .toList()
 
         // Step 5: Run BuildModel (only on valid pairs)
         RUN_BUILDMODEL(
@@ -108,9 +94,10 @@ workflow FOLDX_ANALYSIS {
             parse_fxout_script
         )
 
-        // Step 7: Write missing genes to file
+        // Step 7: Write missing genes to file - pass the gene lists directly
         WRITE_MISSING_GENES(
-            missing_structures.collect()
+            mutation_genes_list,
+            repaired_genes_list
         )
 
     emit:
