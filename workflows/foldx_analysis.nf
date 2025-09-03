@@ -64,13 +64,19 @@ workflow FOLDX_ANALYSIS {
                 [gene, mutation, mut_file, repair_file]
             }
 
-        // Log missing structures and collect them - FIXED VERSION
-        missing_structures = mutation_files
+        // Log missing structures and collect them - CORRECTED VERSION
+        genes_with_mutations = mutation_files
             .map { gene, _mutation, _file -> gene }
             .unique()
-            .join(repaired_files.map { gene, _file -> gene }.unique(), remainder: true)
-            .filter { _gene, repair_gene -> repair_gene == null }
-            .map { gene, _repair_gene -> gene }
+
+        genes_with_structures = repaired_files
+            .map { gene, _file -> gene }
+            .unique()
+
+        missing_structures = genes_with_mutations
+            .join(genes_with_structures, remainder: true)
+            .filter { gene, structure_gene -> structure_gene == null }
+            .map { gene, _structure_gene -> gene }
             .view { gene -> "WARNING: No structure file found for gene: ${gene} - skipping all mutations for this gene" }
 
         // Step 5: Run BuildModel (only on valid pairs)
