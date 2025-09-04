@@ -6,10 +6,11 @@ process REPAIR_STRUCTURES_CONDITIONAL {
     val foldx_path
     path pdb_files
     val repaired_dir
-
+    
     output:
-    path "*_Repair.pdb", emit: repaired_pdbs
-
+    path "*_Repair.pdb", emit: repaired_pdbs, optional: true
+    path "missing_pdb_*.log", emit: missing_pdb_logs, optional: true
+    
     script:
     """
     echo "=== REPAIR_STRUCTURES_CONDITIONAL for gene: ${gene} ==="
@@ -17,17 +18,17 @@ process REPAIR_STRUCTURES_CONDITIONAL {
     echo "Repaired dir: '${repaired_dir}'"
     echo "Available PDB files:"
     ls -la *.pdb 2>/dev/null || echo "No PDB files found"
-
+    
     # Create repaired_structures_dir if it doesn't exist and is specified
     if [[ -n "${repaired_dir}" ]]; then
         mkdir -p "${repaired_dir}"
         echo "Ensured repaired structures directory exists: ${repaired_dir}"
     fi
-
+    
     # Process the specific gene
     echo "Processing gene: ${gene}"
     repaired_file="${gene}_Repair.pdb"
-
+    
     # Check if repaired file exists in provided directory
     if [[ -n "${repaired_dir}" ]]; then
         existing_file="${repaired_dir}/\${repaired_file}"
@@ -39,7 +40,7 @@ process REPAIR_STRUCTURES_CONDITIONAL {
             exit 0
         fi
     fi
-
+    
     echo "Need to repair ${gene} from scratch"
     pdb_file="${gene}.pdb"
     
@@ -55,15 +56,25 @@ process REPAIR_STRUCTURES_CONDITIONAL {
             fi
         else
             echo "ERROR: Repair failed for ${gene}"
-            # Create empty file that will be filtered out later
-            touch "\$repaired_file"
+            # Log the missing PDB instead of creating empty file
+            echo "Gene: ${gene}" > "missing_pdb_${gene}.log"
+            echo "Status: REPAIR_FAILED" >> "missing_pdb_${gene}.log"
+            echo "Reason: FoldX RepairPDB command failed" >> "missing_pdb_${gene}.log"
+            echo "Timestamp: \$(date)" >> "missing_pdb_${gene}.log"
+            # Exit with success but don't create the repaired file
+            exit 0
         fi
     else
         echo "WARNING: PDB file not found or empty: \$pdb_file - skipping gene ${gene}"
-        # Create empty file that will be filtered out later
-        touch "\$repaired_file"
+        # Log the missing PDB instead of creating empty file
+        echo "Gene: ${gene}" > "missing_pdb_${gene}.log"
+        echo "Status: PDB_NOT_FOUND" >> "missing_pdb_${gene}.log"
+        echo "Reason: PDB file not found or empty: \$pdb_file" >> "missing_pdb_${gene}.log"
+        echo "Timestamp: \$(date)" >> "missing_pdb_${gene}.log"
+        # Exit with success but don't create the repaired file
+        exit 0
     fi
-
+    
     echo "Final repaired structure for ${gene}:"
     ls -la *_Repair.pdb 2>/dev/null || echo "No repaired structure created"
     """

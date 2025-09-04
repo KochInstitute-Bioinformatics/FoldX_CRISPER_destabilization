@@ -3,32 +3,33 @@ include { REPAIR_STRUCTURES_CONDITIONAL } from '../modules/repair_structures_con
 include { RUN_BUILDMODEL } from '../modules/run_buildmodel'
 include { CALCULATE_DDG } from '../modules/calculate_ddg'
 include { WRITE_MISSING_GENES } from '../modules/write_missing_genes'
+include { CONSOLIDATE_FAILURE_LOGS } from '../modules/consolidate_failure_logs'
 
 workflow FOLDX_ANALYSIS {
     main:
         // Input validation
         if (!params.mutation_csv) error "Please provide --mutation_csv"
         if (!params.foldx_path) error "Please provide --foldx_path"
-
+        
         // Create input channels
         mutation_csv_ch = Channel.fromPath(params.mutation_csv, checkIfExists: true)
         pdb_files_ch = Channel.fromPath("${params.structure_dir}/*.pdb", checkIfExists: false)
         parse_script_ch = Channel.fromPath("${projectDir}/bin/parse_mutations.py", checkIfExists: true)
-
+        
         // Step 1: Generate mutation files
         GENERATE_MUTATION_FILES(
             mutation_csv_ch,
             params.chain,
             parse_script_ch
         )
-
+        
         // Step 2: Get unique genes for repair - MODIFIED to process individually
         unique_genes_ch = GENERATE_MUTATION_FILES.out.genes
             .splitText()
             .map { it.trim() }
             .filter { it }
             .unique()
-
+        
         // Step 3: Repair structures - NOW RUNS ONE JOB PER GENE
         REPAIR_STRUCTURES_CONDITIONAL(
             unique_genes_ch,
@@ -36,7 +37,7 @@ workflow FOLDX_ANALYSIS {
             pdb_files_ch.collect(),
             params.repaired_structures_dir ?: ""
         )
-
+        
         // Step 4: Prepare mutation-structure pairs
         mutation_files = GENERATE_MUTATION_FILES.out.mutation_files
             .flatten()
@@ -47,7 +48,8 @@ workflow FOLDX_ANALYSIS {
                 def mutation = parts[1..-1].join('_')
                 [gene, mutation, file]
             }
-
+        
+        // Only process genes that have valid repaired structures
         repaired_files = REPAIR_STRUCTURES_CONDITIONAL.out.repaired_pdbs
             .flatten()
             .filter { file -> file.size() > 0 }  // Filter out empty files
@@ -55,51 +57,68 @@ workflow FOLDX_ANALYSIS {
                 def gene = file.name.replaceAll('_Repair\\.pdb$', '')
                 [gene, file]
             }
-
+        
         // Combine mutation files with repaired structures - only keep valid pairs
         mutation_repair_pairs = mutation_files
             .combine(repaired_files, by: 0)
             .map { gene, mutation, mut_file, repair_file ->
                 [gene, mutation, mut_file, repair_file]
             }
-
+        
         // Get unique genes from mutations and repaired structures
         mutation_genes_list = mutation_files
             .map { gene, _mutation, _file -> gene }
             .unique()
             .toList()
-
+        
         repaired_genes_list = repaired_files
             .map { gene, _file -> gene }
             .toList()
-
+        
         // Step 5: Run BuildModel (only on valid pairs)
         RUN_BUILDMODEL(
             mutation_repair_pairs,
             params.foldx_path,
             params.number_of_runs
         )
-
+        
         // Step 6: Calculate ΔΔG
         foldx_results = RUN_BUILDMODEL.out.foldx_results
             .map { _gene, _mutation, files -> files }
             .flatten()
             .collect()
-
+        
         parse_fxout_script = Channel.fromPath("${projectDir}/bin/parse_fxout.py", checkIfExists: true)
-
+        
         CALCULATE_DDG(
             foldx_results,
             parse_fxout_script
         )
-
-        // Step 7: Write missing genes to file
+        
+        // Step 7: Write missing genes to file (keep existing functionality)
         WRITE_MISSING_GENES(
             mutation_genes_list,
             repaired_genes_list
         )
-
+        
+        // Step 8: Consolidate all failure logs
+        missing_pdb_logs = REPAIR_STRUCTURES_CONDITIONAL.out.missing_pdb_logs
+            .collect()
+            .ifEmpty([])
+        
+        missing_position_logs = RUN_BUILDMODEL.out.missing_position_logs
+            .collect()
+            .ifEmpty([])
+        
+        CONSOLIDATE_FAILURE_LOGS(
+            missing_pdb_logs,
+            missing_position_logs
+        )
+    
     emit:
         final_results = CALCULATE_DDG.out.final_results
         missing_genes_file = WRITE_MISSING_GENES.out.missing_genes_file
+        missing_pdbs_summary = CONSOLIDATE_FAILURE_LOGS.out.missing_pdbs_summary
+        missing_positions_summary = CONSOLIDATE_FAILURE_LOGS.out.missing_positions_summary
+        failure_summary = CONSOLIDATE_FAILURE_LOGS.out.failure_summary
 }
